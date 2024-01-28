@@ -123,7 +123,7 @@ class _FishDetectorPageState extends State<FishDetectorPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Fish Detector1'),
+        title: Text('Fish Detector'),
       ),
       body: Column(
         children: [
