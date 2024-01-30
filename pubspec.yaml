@@ -10,16 +10,19 @@ dependencies:
   flutter:
     sdk: flutter
   image_picker: ^1.0.7  # Use the latest version available
+  flutter_dotenv: ^5.0.2
 
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^2.0.2
+  flutter_lints: ^3.0.1
+  fluttertoast: ^8.0.8 # Check for the latest version on pub.dev
 
 flutter:
   uses-material-design: true
-  # assets:
+  assets:
+    - .env
   #  - images/a_dot_burr.jpeg
   #  - images/a_dot_ham.jpeg
   # fonts:

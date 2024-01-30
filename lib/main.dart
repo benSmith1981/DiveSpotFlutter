@@ -5,10 +5,23 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
+import 'fish.dart';
+import "FishDetailsWidget.dart";
+import "FishService.dart";
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:fluttertoast/fluttertoast.dart';
 
-void main() {
+Future main() async {
+  print("Loading .env file");
+  try {
+    await dotenv.load(fileName: ".env");
+    print("Successfully loaded .env file");
+  } catch (e) {
+    print("Failed to load .env file: $e");
+  }
   runApp(MyApp());
 }
+
 
 class MyApp extends StatelessWidget {
   @override
@@ -27,140 +40,142 @@ class FishDetectorPage extends StatefulWidget {
 
 class _FishDetectorPageState extends State<FishDetectorPage> {
   final ImagePicker _picker = ImagePicker();
-  List<String> fishList = [];
+  List<Fish> fishList = [];
   File? _image; // Variable to hold the image file
   Uint8List? _imageBytes;
   String responseText = ""; // Variable to hold the response text
+  bool isLoading = false; // Add this line
 
+  void showToast(String message, {Color backgroundColor = Colors.black, ToastGravity gravity = ToastGravity.BOTTOM}) {
+    Fluttertoast.showToast(
+      msg: message,
+      toastLength: Toast.LENGTH_SHORT,
+      gravity: gravity,
+      timeInSecForIosWeb: 1,
+      backgroundColor: backgroundColor,
+      textColor: Colors.white,
+      fontSize: 16.0
+    );
+  }
   Future<void> pickImage() async {
-    final pickedFile = await _picker.pickImage(source: ImageSource.gallery);
-    if (pickedFile != null) {
-      setState(() {
-        _image = File(pickedFile.path); // Set the _image File
-      });
+    final ImageSource? source = await showDialog<ImageSource>(
+      context: context,
+      builder: (BuildContext context) {
+        return SimpleDialog(
+          title: const Text('Select Image Source'),
+          children: <Widget>[
+            SimpleDialogOption(
+              onPressed: () { Navigator.pop(context, ImageSource.gallery); },
+              child: const Text('Gallery'),
+            ),
+            SimpleDialogOption(
+              onPressed: () { Navigator.pop(context, ImageSource.camera); },
+              child: const Text('Camera'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (source != null) {
+      final pickedFile = await _picker.pickImage(source: source);
+      if (pickedFile != null) {
+        final image = File(pickedFile.path); // Set the _image File
+        final imageBytes = await pickedFile.readAsBytes(); // Get image bytes
+
+        // Now update the state
+        setState(() {
+          _image = image;
+          _imageBytes = imageBytes;
+        });
+      }
     }
   }
 
+
   Future<void> detectFish() async {
-    if (_image == null) return; // Do nothing if no image is selected
+    if (_image == null) {
+      showToast("Please select an image first", backgroundColor: Colors.red);
+      return;
+    }
 
     setState(() {
-      responseText = "Detecting..."; // Update UI to show detecting state
+      isLoading = true; // Start loading
     });
-
-    // Directly read bytes from the file and encode them to Base64
     String imageBase64 = base64Encode(await _image!.readAsBytes());
 
     try {
-      var response = await http.post(
-        Uri.parse('https://api.openai.com/v1/chat/completions'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer YOUR_API_KEY', // Replace with your actual API Key
-        },
-        body: json.encode({
-          'model': 'gpt-4-vision-preview', // Specify the model, replace with the actual model you want to use
-          'messages': [
-            {'role': 'system', 'content': 'You are a helpful assistant, capable of identifying fish and sea creatures in images.'},
-            {'role': 'user', 
-            "content": [
-                {
-                  "type": "text",
-                  // "text": "What fish can you detect in thailand and sharks?"
-
-                  "text": "What fish or sea creature (could be a shark, turtle whale any animal you find in the sea) can you detect in this image? Respond in json only. Assuming JSON content starts with '{' so we can parse it. Should have 'fish' key that shows and array dictionary of containing 'name', 'species', 'description', 'location', 'endangered', 'GPS-Coords' of where you can find this species, for each type of fish"
-                },
-                {
-                  "type": "image_url",
-                  "image_url": {
-                    "url": 'data:image/jpeg;base64,'+imageBase64
-                  }
-                }
-              ]
-            }
-          ],
-          'max_tokens': 1000 // Increase this value as needed
-
-        }),
-      );
-
-      if (response.statusCode == 200) {
-        setState(() {
-          var data = json.decode(response.body);
-          var contentString = data['choices']?.first['message']['content'] ?? '';
-
-          // Find the start and end of the JSON content within the 'content' string
-          int jsonStartIndex = contentString.indexOf('{');
-          int jsonEndIndex = contentString.lastIndexOf('}');
-
-          if (jsonStartIndex != -1 && jsonEndIndex != -1) {
-            var jsonString = contentString.substring(jsonStartIndex, jsonEndIndex + 1);
-            var contentData = json.decode(jsonString);
-
-            // Process the extracted JSON data
-            responseText = contentData.toString(); // Or process as needed
-            List<dynamic> fishDetails = contentData['fish'] ?? [];
-            fishList = fishDetails.map((f) => "Name: ${f['name']}, Species: ${f['species']}, Description: ${f['description']}").toList();
-          } else {
-            responseText = 'No valid JSON content found';
-          }
-        });
-
-      }  else {
-        setState(() {
-          responseText = "Error: ${response.statusCode}";
-        });
-      }
-    } catch (e) {
+      var fishService = FishService();
+      var newList = await fishService.detectFish(imageBase64);
+      // Update state with the list of fish
       setState(() {
-        responseText = "Error: ${e.toString()}";
+        this.fishList = newList; // Update state with the list of fish
+      });
+      showToast("Detection complete", backgroundColor: Colors.green);
+
+    } catch (e) {
+      showToast("Error: ${e.toString()}", backgroundColor: Colors.red);
+    }finally {
+      setState(() {
+        isLoading = false; // Stop loading regardless of success or error
       });
     }
   }
 
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('Fish Detector'),
-      ),
-      body: Column(
-        children: [
-          ElevatedButton(
-            onPressed: pickImage, // Button to pick the image
-            child: Text('Pick Image'),
-          ),
-          if (_imageBytes != null) Image.memory(_imageBytes!),
-          if (_image != null) Image.file(_image!), // Display the selected image
-          ElevatedButton(
-            onPressed: detectFish, // Button to detect fish
-            child: Text('Detect Fish'),
-          ),
-          Expanded(
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                minHeight: 500, // Adjust as needed
-              ),
-              child: SingleChildScrollView(
-                child: Text(responseText),
-              ),
-            ),
-          ),
-
-
-          Expanded(
-            child: ListView.builder(
-              itemCount: fishList.length,
-              itemBuilder: (context, index) {
-                return ListTile(
-                  title: Text(fishList[index]),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
+  // Method to parse JSON data into Fish objects
+  void processFishData(dynamic jsonData) {
+    List<Fish> fishList = [];
+    for (var fishData in jsonData) {
+      fishList.add(Fish.fromJson(fishData));
+    }
+    setState(() {
+      this.fishList = fishList;
+    });
   }
+
+
+@override
+Widget build(BuildContext context) {
+  return Scaffold(
+    appBar: AppBar(
+      title: Text('Anything Detector'),
+    ),
+    body: Stack(
+      children: <Widget>[
+        Column(
+          children: [
+            ElevatedButton(
+              onPressed: pickImage,
+              child: Text('Pick Image'),
+            ),
+            if (_image != null) 
+              Container(
+                height: 200, // Fixed height for the image container
+                child: Image.file(_image!, fit: BoxFit.cover),
+              ),
+            ElevatedButton(
+              onPressed: detectFish,
+              child: Text('Detect Anything'),
+            ),
+            Expanded(
+              child: ListView.builder(
+                itemCount: fishList.length,
+                itemBuilder: (context, index) {
+                  return FishDetailsWidget(fish: fishList[index]);
+                },
+              ),
+            ),
+          ],
+        ),
+        if (isLoading)
+          Positioned.fill(
+            child: Container(
+              child: Center(child: CircularProgressIndicator()),
+            ),
+          ),
+      ],
+    ),
+  );
+}
+
 }
